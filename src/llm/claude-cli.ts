@@ -3,7 +3,7 @@ import type { LLMProvider, LLMCallOptions, LLMStreamOptions, LLMStreamCallbacks,
 
 const CLAUDE_CLI_BIN = 'claude';
 /** Max time for a single claude -p invocation (e.g. long generation). */
-const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
  * Provider that uses the Claude Code CLI (`claude -p "..."`).
@@ -30,13 +30,57 @@ export class ClaudeCliProvider implements LLMProvider {
   }
 
   async stream(options: LLMStreamOptions, callbacks: LLMStreamCallbacks): Promise<void> {
-    try {
-      const text = await this.call(options);
-      if (text) callbacks.onText(text);
-      callbacks.onEnd({ stopReason: 'end_turn' });
-    } catch (err) {
-      callbacks.onError(err instanceof Error ? err : new Error(String(err)));
-    }
+    const combined = this.buildCombinedPrompt(options);
+    const child = spawn(CLAUDE_CLI_BIN, ['-p', combined], {
+      cwd: process.cwd(),
+      stdio: ['ignore', 'pipe', 'inherit'],
+      env: process.env,
+    });
+
+    let settled = false;
+    const chunks: Buffer[] = [];
+
+    child.stdout!.on('data', (chunk: Buffer) => {
+      chunks.push(chunk);
+      callbacks.onText(chunk.toString('utf-8'));
+    });
+
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      if (!settled) {
+        settled = true;
+        callbacks.onError(
+          new Error(
+            `Claude CLI timed out after ${this.timeoutMs / 1000}s. Set CALIBER_CLAUDE_CLI_TIMEOUT_MS to increase.`
+          )
+        );
+      }
+    }, this.timeoutMs);
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      if (!settled) {
+        settled = true;
+        callbacks.onError(err);
+      }
+    });
+
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      if (settled) return;
+      settled = true;
+      if (code === 0) {
+        callbacks.onEnd({ stopReason: 'end_turn' });
+      } else {
+        const stdout = Buffer.concat(chunks).toString('utf-8').trim();
+        const msg = signal
+          ? `Claude CLI killed (${signal})`
+          : code != null
+            ? `Claude CLI exited with code ${code}`
+            : 'Claude CLI exited';
+        callbacks.onError(new Error(stdout ? `${msg}. Output: ${stdout.slice(0, 200)}` : msg));
+      }
+    });
   }
 
   private buildCombinedPrompt(options: LLMCallOptions | LLMStreamOptions): string {

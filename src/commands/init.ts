@@ -91,6 +91,7 @@ export async function initCommand(options: InitOptions) {
 
   // Baseline score before generation
   const baselineScore = computeLocalScore(process.cwd(), targetAgent);
+  displayScore(baselineScore);
 
   const hasExistingConfig = !!(
     fingerprint.existingConfigs.claudeMd || fingerprint.existingConfigs.claudeSettings ||
@@ -100,8 +101,6 @@ export async function initCommand(options: InitOptions) {
 
   // Score gating: skip generation if already perfect, targeted fix if close
   if (hasExistingConfig && baselineScore.score === 100) {
-    console.log(chalk.hex('#6366f1').bold('  Step 3/4 — Score check\n'));
-    displayScore(baselineScore);
     console.log(chalk.bold.green('  Your setup is already optimal — nothing to change.\n'));
     console.log(chalk.dim('  Run `caliber init --force` to regenerate anyway.\n'));
     if (!options.force) return;
