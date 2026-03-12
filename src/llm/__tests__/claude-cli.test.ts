@@ -84,6 +84,92 @@ describe('ClaudeCliProvider', () => {
     expect(onEnd).toHaveBeenCalledWith({ stopReason: 'end_turn' });
   });
 
+  it('call() passes --model flag when options.model is set', async () => {
+    const stdoutChunks = [Buffer.from('response')];
+    let closeCb: (code: number) => void;
+    spawn.mockReturnValue({
+      stdout: {
+        on: vi.fn((ev: string, fn: (c: Buffer) => void) => {
+          if (ev === 'data') setTimeout(() => stdoutChunks.forEach(fn), 0);
+        }),
+      },
+      on: vi.fn((ev: string, fn: (code: number) => void) => {
+        if (ev === 'close') closeCb = fn;
+      }),
+      kill: vi.fn(),
+    });
+
+    const provider = new ClaudeCliProvider({ provider: 'claude-cli', model: 'default' });
+    const resultPromise = provider.call({
+      system: 'S',
+      prompt: 'P',
+      model: 'claude-haiku-4-5',
+    });
+
+    await new Promise((r) => setTimeout(r, 10));
+    closeCb!(0);
+    await resultPromise;
+
+    const args = spawn.mock.calls[0][1];
+    expect(args).toContain('--model');
+    expect(args).toContain('claude-haiku-4-5');
+  });
+
+  it('call() does not pass --model flag when options.model is not set', async () => {
+    const stdoutChunks = [Buffer.from('response')];
+    let closeCb: (code: number) => void;
+    spawn.mockReturnValue({
+      stdout: {
+        on: vi.fn((ev: string, fn: (c: Buffer) => void) => {
+          if (ev === 'data') setTimeout(() => stdoutChunks.forEach(fn), 0);
+        }),
+      },
+      on: vi.fn((ev: string, fn: (code: number) => void) => {
+        if (ev === 'close') closeCb = fn;
+      }),
+      kill: vi.fn(),
+    });
+
+    const provider = new ClaudeCliProvider({ provider: 'claude-cli', model: 'default' });
+    const resultPromise = provider.call({ system: 'S', prompt: 'P' });
+
+    await new Promise((r) => setTimeout(r, 10));
+    closeCb!(0);
+    await resultPromise;
+
+    const args = spawn.mock.calls[0][1];
+    expect(args).not.toContain('--model');
+  });
+
+  it('stream() passes --model flag when options.model is set', async () => {
+    let closeCb: (code: number) => void;
+    spawn.mockReturnValue({
+      stdout: {
+        on: vi.fn((ev: string, fn: (c: Buffer) => void) => {
+          if (ev === 'data') setTimeout(() => fn(Buffer.from('ok')), 0);
+        }),
+      },
+      on: vi.fn((ev: string, fn: (code: number) => void) => {
+        if (ev === 'close') closeCb = fn;
+      }),
+      kill: vi.fn(),
+    });
+
+    const provider = new ClaudeCliProvider({ provider: 'claude-cli', model: 'default' });
+    const streamPromise = provider.stream(
+      { system: 'S', prompt: 'P', model: 'claude-haiku-4-5' },
+      { onText: vi.fn(), onEnd: vi.fn(), onError: vi.fn() }
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+    closeCb!(0);
+    await streamPromise;
+
+    const args = spawn.mock.calls[0][1];
+    expect(args).toContain('--model');
+    expect(args).toContain('claude-haiku-4-5');
+  });
+
   it('uses CALIBER_CLAUDE_CLI_TIMEOUT_MS when set', () => {
     const orig = process.env.CALIBER_CLAUDE_CLI_TIMEOUT_MS;
     process.env.CALIBER_CLAUDE_CLI_TIMEOUT_MS = '120000';

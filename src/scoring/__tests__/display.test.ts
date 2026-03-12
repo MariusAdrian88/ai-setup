@@ -21,7 +21,7 @@ vi.mock('chalk', () => {
   return { default: chalk };
 });
 
-import { displayScoreDelta, displayScore } from '../display.js';
+import { displayScoreDelta, displayScore, displayScoreSummary } from '../display.js';
 
 function makeCheck(overrides: Partial<Check> & { id: string; name: string; category: Check['category'] }): Check {
   return {
@@ -133,6 +133,85 @@ describe('displayScoreDelta', () => {
 
     const output = logs.join('\n');
     expect(output).not.toContain('What improved');
+  });
+});
+
+describe('displayScoreSummary', () => {
+  let logs: string[];
+
+  beforeEach(() => {
+    logs = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    });
+  });
+
+  it('shows score, grade, and agent label', () => {
+    const result = makeScoreResult({ score: 66, grade: 'C', targetAgent: 'claude' });
+    displayScoreSummary(result);
+    const output = logs.join('\n');
+    expect(output).toContain('66/100');
+    expect(output).toContain('Grade C');
+    expect(output).toContain('Claude Code');
+  });
+
+  it('shows failing check names without suggestions', () => {
+    const result = makeScoreResult({
+      score: 50,
+      grade: 'C',
+      checks: [
+        makeCheck({ id: 'a', name: 'Skills configured', category: 'existence', passed: false }),
+        makeCheck({ id: 'b', name: 'Build commands', category: 'quality', passed: false }),
+        makeCheck({ id: 'c', name: 'Passing check', category: 'accuracy', passed: true, earnedPoints: 5 }),
+      ],
+    });
+    displayScoreSummary(result);
+    const output = logs.join('\n');
+    expect(output).toContain('Skills configured');
+    expect(output).toContain('Build commands');
+    expect(output).not.toContain('Passing check');
+  });
+
+  it('shows caliber score hint only once', () => {
+    const result = makeScoreResult({
+      score: 50,
+      grade: 'C',
+      checks: [
+        makeCheck({ id: 'a', name: 'Failing', category: 'existence', passed: false }),
+      ],
+    });
+    displayScoreSummary(result);
+    const output = logs.join('\n');
+    const matches = output.match(/caliber score/g);
+    expect(matches).toHaveLength(1);
+  });
+
+  it('caps displayed failing checks at 5', () => {
+    const checks = Array.from({ length: 8 }, (_, i) =>
+      makeCheck({ id: `f${i}`, name: `Fail ${i}`, category: 'existence', passed: false })
+    );
+    const result = makeScoreResult({ score: 20, grade: 'F', checks });
+    displayScoreSummary(result);
+    const output = logs.join('\n');
+    // Should show 5 failing checks + "+3 more"
+    expect(output).toContain('+3 more');
+    expect(output).toContain('Fail 0');
+    expect(output).toContain('Fail 4');
+    expect(output).not.toContain('Fail 5');
+  });
+
+  it('shows no failing section when all checks pass', () => {
+    const result = makeScoreResult({
+      score: 100,
+      grade: 'A',
+      checks: [
+        makeCheck({ id: 'a', name: 'Passing', category: 'existence', passed: true, earnedPoints: 10 }),
+      ],
+    });
+    displayScoreSummary(result);
+    const output = logs.join('\n');
+    expect(output).not.toContain('caliber score');
+    expect(output).not.toContain('✗');
   });
 });
 

@@ -17,6 +17,7 @@ import { installLearningHooks } from '../lib/learning-hooks.js';
 import { writeState, getCurrentHeadSha } from '../lib/state.js';
 import { SpinnerMessages, GENERATION_MESSAGES, REFINE_MESSAGES } from '../utils/spinner-messages.js';
 import { loadConfig } from '../llm/config.js';
+import { llmJsonCall } from '../llm/index.js';
 import { runInteractiveProviderSetup } from './interactive-provider-setup.js';
 import { computeLocalScore } from '../scoring/index.js';
 import { displayScoreSummary, displayScoreDelta } from '../scoring/display.js';
@@ -208,6 +209,13 @@ export async function initCommand(options: InitOptions) {
   genSpinner.succeed(`Setup generated ${chalk.dim(`in ${timeStr}`)}`);
   printSetupSummary(generatedSetup);
 
+  // Session context — carries through the entire init flow
+  const sessionHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  sessionHistory.push({
+    role: 'assistant',
+    content: summarizeSetup('Initial generation', generatedSetup),
+  });
+
   // Step 5: Accept / Refine / Decline with staging
   console.log(title.bold('  Step 4/4 — Review\n'));
 
@@ -219,13 +227,13 @@ export async function initCommand(options: InitOptions) {
   const wantsReview = await promptWantsReview();
   if (wantsReview) {
     const reviewMethod = await promptReviewMethod();
-    openReview(reviewMethod, staged.stagedFiles);
+    await openReview(reviewMethod, staged.stagedFiles);
   }
 
   let action = await promptReviewAction();
 
   while (action === 'refine') {
-    generatedSetup = await refineLoop(generatedSetup, targetAgent);
+    generatedSetup = await refineLoop(generatedSetup, targetAgent, sessionHistory);
     if (!generatedSetup) {
       cleanupStaging();
       console.log(chalk.dim('Refinement cancelled. No files were modified.'));
@@ -235,11 +243,7 @@ export async function initCommand(options: InitOptions) {
     const restaged = stageFiles(updatedFiles, process.cwd());
     console.log(chalk.dim(`  ${chalk.green(`${restaged.newFiles} new`)} / ${chalk.yellow(`${restaged.modifiedFiles} modified`)} file${restaged.newFiles + restaged.modifiedFiles !== 1 ? 's' : ''}\n`));
     printSetupSummary(generatedSetup);
-    const wantsReviewAgain = await promptWantsReview();
-    if (wantsReviewAgain) {
-      const reviewMethod = await promptReviewMethod();
-      openReview(reviewMethod, restaged.stagedFiles);
-    }
+    await openReview('terminal', restaged.stagedFiles);
     action = await promptReviewAction();
   }
 
@@ -365,10 +369,9 @@ export async function initCommand(options: InitOptions) {
 
 async function refineLoop(
   currentSetup: Record<string, unknown>,
-  _targetAgent: string
+  _targetAgent: string,
+  sessionHistory: Array<{ role: 'user' | 'assistant'; content: string }>,
 ): Promise<Record<string, unknown> | null> {
-  const history: Array<{ role: 'user' | 'assistant'; content: string }> = [];
-
   while (true) {
     const message = await promptInput('\nWhat would you like to change?');
     if (!message || message.toLowerCase() === 'done' || message.toLowerCase() === 'accept') {
@@ -378,6 +381,15 @@ async function refineLoop(
       return null;
     }
 
+    // Quick intent check — avoid sending non-refinement requests to the expensive model
+    const isValid = await classifyRefineIntent(message);
+    if (!isValid) {
+      console.log(chalk.dim('  This doesn\'t look like a config change request.'));
+      console.log(chalk.dim('  Describe what to add, remove, or modify in your configs.'));
+      console.log(chalk.dim('  Type "done" to accept the current setup.\n'));
+      continue;
+    }
+
     const refineSpinner = ora('Refining setup...').start();
     const refineMessages = new SpinnerMessages(refineSpinner, REFINE_MESSAGES);
     refineMessages.start();
@@ -385,15 +397,18 @@ async function refineLoop(
     const refined = await refineSetup(
       currentSetup,
       message,
-      history,
+      sessionHistory,
     );
 
     refineMessages.stop();
 
     if (refined) {
       currentSetup = refined;
-      history.push({ role: 'user', content: message });
-      history.push({ role: 'assistant', content: JSON.stringify(refined) });
+      sessionHistory.push({ role: 'user', content: message });
+      sessionHistory.push({
+        role: 'assistant',
+        content: summarizeSetup('Applied changes', refined),
+      });
       refineSpinner.succeed('Setup updated');
       printSetupSummary(refined);
       console.log(chalk.dim('Type "done" to accept, or describe more changes.'));
@@ -401,6 +416,33 @@ async function refineLoop(
       refineSpinner.fail('Refinement failed — could not parse AI response.');
       console.log(chalk.dim('Try rephrasing your request, or type "done" to keep the current setup.'));
     }
+  }
+}
+
+function summarizeSetup(action: string, setup: Record<string, unknown>): string {
+  const descriptions = setup.fileDescriptions as Record<string, string> | undefined;
+  const files = descriptions
+    ? Object.entries(descriptions).map(([path, desc]) => `  ${path}: ${desc}`).join('\n')
+    : Object.keys(setup).filter(k => k !== 'targetAgent' && k !== 'fileDescriptions').join(', ');
+  return `${action}. Files:\n${files}`;
+}
+
+async function classifyRefineIntent(message: string): Promise<boolean> {
+  const fastModel = process.env.ANTHROPIC_SMALL_FAST_MODEL;
+  try {
+    const result = await llmJsonCall<{ valid: boolean }>({
+      system: `You classify whether a user message is a valid request to modify AI agent config files (CLAUDE.md, .cursorrules, skills).
+Valid: requests to add, remove, change, or restructure config content. Examples: "add testing commands", "remove the terraform section", "make CLAUDE.md shorter".
+Invalid: questions, requests to show/display something, general chat, or anything that isn't a concrete config change.
+Return {"valid": true} or {"valid": false}. Nothing else.`,
+      prompt: message,
+      maxTokens: 20,
+      ...(fastModel ? { model: fastModel } : {}),
+    });
+    return result.valid === true;
+  } catch {
+    // If the check fails, let it through — better to try than block
+    return true;
   }
 }
 
@@ -471,33 +513,217 @@ async function promptReviewMethod(): Promise<ReviewMethod> {
   return select({ message: 'How would you like to review the changes?', choices });
 }
 
-function openReview(method: ReviewMethod, stagedFiles: StagedFile[]): void {
+async function openReview(method: ReviewMethod, stagedFiles: StagedFile[]): Promise<void> {
   if (method === 'cursor' || method === 'vscode') {
     openDiffsInEditor(method, stagedFiles.map(f => ({
       originalPath: f.originalPath,
       proposedPath: f.proposedPath,
     })));
     console.log(chalk.dim('  Diffs opened in your editor.\n'));
-  } else {
-    for (const file of stagedFiles) {
-      if (file.currentPath) {
-        const currentLines = fs.readFileSync(file.currentPath, 'utf-8').split('\n');
-        const proposedLines = fs.readFileSync(file.proposedPath, 'utf-8').split('\n');
-        const patch = createTwoFilesPatch(file.relativePath, file.relativePath, currentLines.join('\n'), proposedLines.join('\n'));
-        let added = 0, removed = 0;
-        for (const line of patch.split('\n')) {
-          if (line.startsWith('+') && !line.startsWith('+++')) added++;
-          if (line.startsWith('-') && !line.startsWith('---')) removed++;
-        }
-        console.log(`    ${chalk.yellow('~')} ${file.relativePath}  ${chalk.green(`+${added}`)} ${chalk.red(`-${removed}`)}`);
-      } else {
-        const lines = fs.readFileSync(file.proposedPath, 'utf-8').split('\n').length;
-        console.log(`    ${chalk.green('+')} ${file.relativePath}  ${chalk.dim(`${lines} lines`)}`);
-      }
+    return;
+  }
+
+  // Build file info for the interactive explorer
+  const fileInfos = stagedFiles.map(file => {
+    const proposed = fs.readFileSync(file.proposedPath, 'utf-8');
+    const current = file.currentPath ? fs.readFileSync(file.currentPath, 'utf-8') : '';
+    const patch = createTwoFilesPatch(
+      file.isNew ? '/dev/null' : file.relativePath,
+      file.relativePath,
+      current,
+      proposed,
+    );
+    let added = 0, removed = 0;
+    for (const line of patch.split('\n')) {
+      if (line.startsWith('+') && !line.startsWith('+++')) added++;
+      if (line.startsWith('-') && !line.startsWith('---')) removed++;
+    }
+    return {
+      relativePath: file.relativePath,
+      isNew: file.isNew,
+      added,
+      removed,
+      lines: proposed.split('\n').length,
+      patch,
+    };
+  });
+
+  await interactiveDiffExplorer(fileInfos);
+}
+
+interface FileInfo {
+  relativePath: string;
+  isNew: boolean;
+  added: number;
+  removed: number;
+  lines: number;
+  patch: string;
+}
+
+async function interactiveDiffExplorer(files: FileInfo[]): Promise<void> {
+  if (!process.stdin.isTTY) {
+    // Fallback: just print file list
+    for (const f of files) {
+      const icon = f.isNew ? chalk.green('+') : chalk.yellow('~');
+      const stats = f.isNew
+        ? chalk.dim(`${f.lines} lines`)
+        : `${chalk.green(`+${f.added}`)} ${chalk.red(`-${f.removed}`)}`;
+      console.log(`    ${icon} ${f.relativePath}  ${stats}`);
     }
     console.log('');
-    console.log(chalk.dim(`  Files staged at .caliber/staged/ for manual inspection.\n`));
+    return;
   }
+
+  const { stdin, stdout } = process;
+  let cursor = 0;
+  let viewing: number | null = null;
+  let scrollOffset = 0;
+  let lineCount = 0;
+
+  function getTermHeight(): number {
+    return (stdout.rows || 24) - 4;
+  }
+
+  function renderFileList(): string {
+    const lines: string[] = [];
+    lines.push(chalk.bold('  Review changes'));
+    lines.push('');
+
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const ptr = i === cursor ? chalk.cyan('>') : ' ';
+      const icon = f.isNew ? chalk.green('+') : chalk.yellow('~');
+      const stats = f.isNew
+        ? chalk.dim(`${f.lines} lines`)
+        : `${chalk.green(`+${f.added}`)} ${chalk.red(`-${f.removed}`)}`;
+      lines.push(`  ${ptr} ${icon} ${f.relativePath}  ${stats}`);
+    }
+
+    lines.push('');
+    lines.push(chalk.dim('  ↑↓ navigate  ⏎ view diff  q done'));
+    return lines.join('\n');
+  }
+
+  function renderDiff(index: number): string {
+    const f = files[index];
+    const lines: string[] = [];
+    const header = f.isNew
+      ? `  ${chalk.green('+')} ${f.relativePath} ${chalk.dim('(new file)')}`
+      : `  ${chalk.yellow('~')} ${f.relativePath} ${chalk.green(`+${f.added}`)} ${chalk.red(`-${f.removed}`)}`;
+    lines.push(header);
+    lines.push(chalk.dim('  ' + '─'.repeat(60)));
+
+    const patchLines = f.patch.split('\n');
+    // Skip the unified diff header (first 4 lines)
+    const bodyLines = patchLines.slice(4);
+    const maxVisible = getTermHeight() - 4;
+    const visibleLines = bodyLines.slice(scrollOffset, scrollOffset + maxVisible);
+
+    for (const line of visibleLines) {
+      if (line.startsWith('+')) {
+        lines.push(chalk.green('  ' + line));
+      } else if (line.startsWith('-')) {
+        lines.push(chalk.red('  ' + line));
+      } else if (line.startsWith('@@')) {
+        lines.push(chalk.cyan('  ' + line));
+      } else {
+        lines.push(chalk.dim('  ' + line));
+      }
+    }
+
+    const totalBody = bodyLines.length;
+    if (totalBody > maxVisible) {
+      const pct = Math.round(((scrollOffset + maxVisible) / totalBody) * 100);
+      lines.push(chalk.dim(`  ── ${Math.min(pct, 100)}% ──`));
+    }
+
+    lines.push('');
+    lines.push(chalk.dim('  ↑↓ scroll  ⎵/esc back to file list'));
+    return lines.join('\n');
+  }
+
+  function draw(initial: boolean) {
+    if (!initial && lineCount > 0) {
+      stdout.write(`\x1b[${lineCount}A`);
+    }
+    stdout.write('\x1b[0J');
+    const output = viewing !== null ? renderDiff(viewing) : renderFileList();
+    stdout.write(output + '\n');
+    lineCount = output.split('\n').length;
+  }
+
+  return new Promise((resolve) => {
+    console.log('');
+    draw(true);
+
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding('utf8');
+
+    function cleanup() {
+      stdin.removeListener('data', onData);
+      stdin.setRawMode(false);
+      stdin.pause();
+    }
+
+    function onData(key: string) {
+      if (viewing !== null) {
+        // Diff view mode
+        const f = files[viewing];
+        const totalBody = f.patch.split('\n').length - 4;
+        const maxVisible = getTermHeight() - 4;
+
+        switch (key) {
+          case '\x1b[A': // up
+            scrollOffset = Math.max(0, scrollOffset - 1);
+            draw(false);
+            break;
+          case '\x1b[B': // down
+            scrollOffset = Math.min(Math.max(0, totalBody - maxVisible), scrollOffset + 1);
+            draw(false);
+            break;
+          case ' ':
+          case '\x1b':
+            viewing = null;
+            scrollOffset = 0;
+            draw(false);
+            break;
+          case 'q':
+          case '\x03':
+            cleanup();
+            console.log('');
+            resolve();
+            break;
+        }
+      } else {
+        // File list mode
+        switch (key) {
+          case '\x1b[A':
+            cursor = (cursor - 1 + files.length) % files.length;
+            draw(false);
+            break;
+          case '\x1b[B':
+            cursor = (cursor + 1) % files.length;
+            draw(false);
+            break;
+          case '\r':
+          case '\n':
+            viewing = cursor;
+            scrollOffset = 0;
+            draw(false);
+            break;
+          case 'q':
+          case '\x03':
+            cleanup();
+            console.log('');
+            resolve();
+            break;
+        }
+      }
+    }
+
+    stdin.on('data', onData);
+  });
 }
 
 async function promptReviewAction(): Promise<'accept' | 'refine' | 'decline'> {
