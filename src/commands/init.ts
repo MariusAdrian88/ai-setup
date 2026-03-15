@@ -130,7 +130,7 @@ export async function initCommand(options: InitOptions) {
 
   if (report) {
     report.markStep('Fingerprint');
-    report.addJson('Fingerprint: Git', { remote: fingerprint.remote, packageName: fingerprint.packageName });
+    report.addJson('Fingerprint: Git', { remote: fingerprint.gitRemoteUrl, packageName: fingerprint.packageName });
     report.addCodeBlock('Fingerprint: File Tree', fingerprint.fileTree.join('\n'));
     report.addJson('Fingerprint: Detected Stack', { languages: fingerprint.languages, frameworks: fingerprint.frameworks, tools: fingerprint.tools });
     report.addJson('Fingerprint: Existing Configs', fingerprint.existingConfigs);
@@ -165,7 +165,7 @@ export async function initCommand(options: InitOptions) {
   if (report) {
     report.markStep('Baseline scoring');
     report.addSection('Scoring: Baseline', `**Score**: ${baselineScore.score}/100\n\n| Check | Passed | Points | Max |\n|-------|--------|--------|-----|\n` +
-      baselineScore.checks.map(c => `| ${c.name} | ${c.passed ? 'Yes' : 'No'} | ${c.points} | ${c.maxPoints} |`).join('\n'));
+      baselineScore.checks.map(c => `| ${c.name} | ${c.passed ? 'Yes' : 'No'} | ${c.earnedPoints} | ${c.maxPoints} |`).join('\n'));
     report.addSection('Generation: Target Agents', targetAgent.join(', '));
   }
 
@@ -177,7 +177,14 @@ export async function initCommand(options: InitOptions) {
   );
 
   // Checks the LLM cannot fix — they require CLI actions, not config changes
-  const NON_LLM_CHECKS = new Set(['hooks_configured', 'agents_md_exists', 'permissions_configured', 'mcp_servers']);
+  const NON_LLM_CHECKS = new Set([
+    'hooks_configured',
+    'agents_md_exists',
+    'permissions_configured',
+    'mcp_servers',
+    'service_coverage',
+    'mcp_completeness',
+  ]);
 
   // Score gating: skip generation if already perfect, targeted fix if close
   if (hasExistingConfig && baselineScore.score === 100) {
@@ -461,7 +468,52 @@ export async function initCommand(options: InitOptions) {
   }
 
   // Show score improvement
-  const afterScore = computeLocalScore(process.cwd(), targetAgent);
+  let afterScore = computeLocalScore(process.cwd(), targetAgent);
+
+  // Score polish: if not 100, attempt one targeted fix pass
+  if (afterScore.score < 100) {
+    const polishFailingChecks = afterScore.checks
+      .filter(c => !c.passed && c.maxPoints > 0)
+      .filter(c => !NON_LLM_CHECKS.has(c.id));
+
+    if (polishFailingChecks.length > 0) {
+      console.log('');
+      console.log(chalk.dim(`  Score: ${afterScore.score}/100 — polishing ${polishFailingChecks.length} remaining check${polishFailingChecks.length === 1 ? '' : 's'}...`));
+
+      const polishFailing: FailingCheck[] = polishFailingChecks.map(c => ({
+        name: c.name,
+        suggestion: c.suggestion,
+      }));
+      const polishPassing: PassingCheck[] = afterScore.checks
+        .filter(c => c.passed)
+        .map(c => ({ name: c.name }));
+
+      try {
+        const polishResult = await generateSetup(
+          fingerprint,
+          targetAgent,
+          undefined,
+          {
+            onStatus: () => {},
+            onComplete: () => {},
+            onError: () => {},
+          },
+          polishFailing,
+          afterScore.score,
+          polishPassing,
+        );
+
+        if (polishResult.setup) {
+          const polishWriteResult = writeSetup(polishResult.setup as unknown as Parameters<typeof writeSetup>[0]);
+          if (polishWriteResult.written.length > 0) {
+            afterScore = computeLocalScore(process.cwd(), targetAgent);
+          }
+        }
+      } catch {
+        // Polish failed — continue with current score
+      }
+    }
+  }
 
   // Guard: if score regressed, auto-undo
   if (afterScore.score < baselineScore.score) {
@@ -481,7 +533,7 @@ export async function initCommand(options: InitOptions) {
   if (report) {
     report.markStep('Post-write scoring');
     report.addSection('Scoring: Post-Write', `**Score**: ${afterScore.score}/100 (delta: ${afterScore.score - baselineScore.score >= 0 ? '+' : ''}${afterScore.score - baselineScore.score})\n\n| Check | Passed | Points | Max |\n|-------|--------|--------|-----|\n` +
-      afterScore.checks.map(c => `| ${c.name} | ${c.passed ? 'Yes' : 'No'} | ${c.points} | ${c.maxPoints} |`).join('\n'));
+      afterScore.checks.map(c => `| ${c.name} | ${c.passed ? 'Yes' : 'No'} | ${c.earnedPoints} | ${c.maxPoints} |`).join('\n'));
   }
 
   displayScoreDelta(baselineScore, afterScore);

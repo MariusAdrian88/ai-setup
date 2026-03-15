@@ -6,6 +6,12 @@ import {
   POINTS_SERVICE_COVERAGE,
   POINTS_MCP_COVERAGE,
 } from '../constants.js';
+import {
+  extractNpmDeps,
+  extractPythonDeps,
+  extractGoDeps,
+  extractRustDeps,
+} from '../../utils/dependencies.js';
 
 function readFileOrNull(path: string): string | null {
   try {
@@ -13,109 +19,6 @@ function readFileOrNull(path: string): string | null {
   } catch {
     return null;
   }
-}
-
-function readJsonOrNull(path: string): Record<string, unknown> | null {
-  const content = readFileOrNull(path);
-  if (!content) return null;
-  try {
-    return JSON.parse(content) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-/** Extract major dependencies from package.json (top 15 non-trivial deps). */
-function extractNpmDeps(dir: string): string[] {
-  const pkg = readJsonOrNull(join(dir, 'package.json'));
-  if (!pkg) return [];
-
-  const deps = {
-    ...(pkg.dependencies as Record<string, string> | undefined),
-    ...(pkg.devDependencies as Record<string, string> | undefined),
-  };
-
-  // Filter out trivial/meta/tooling packages that don't need agent coverage
-  const trivial = new Set([
-    'typescript', '@types/node', 'tslib', 'ts-node', 'tsx',
-    'prettier', 'eslint', '@eslint/js',
-    'rimraf', 'cross-env', 'dotenv', 'nodemon',
-    'husky', 'lint-staged', 'commitlint',
-    '@commitlint/cli', '@commitlint/config-conventional',
-  ]);
-
-  // Also exclude CLI tools / code quality tools that aren't project deps
-  const trivialPatterns = [
-    /^@rely-ai\//,
-    /^@caliber-ai\//,
-    /^eslint-/,
-    /^@eslint\//,
-    /^prettier-/,
-    /^@typescript-eslint\//,
-  ];
-
-  return Object.keys(deps)
-    .filter(d => !trivial.has(d) && !d.startsWith('@types/') && !trivialPatterns.some(p => p.test(d)))
-    .slice(0, 30);
-}
-
-/** Extract dependencies from pyproject.toml or requirements.txt. */
-function extractPythonDeps(dir: string): string[] {
-  // Try requirements.txt first
-  const reqTxt = readFileOrNull(join(dir, 'requirements.txt'));
-  if (reqTxt) {
-    return reqTxt
-      .split('\n')
-      .map(l => l.trim().split(/[=<>!~\[]/)[0].trim())
-      .filter(l => l && !l.startsWith('#'))
-      .slice(0, 30);
-  }
-
-  // Try pyproject.toml
-  const pyproject = readFileOrNull(join(dir, 'pyproject.toml'));
-  if (pyproject) {
-    const depMatch = pyproject.match(/dependencies\s*=\s*\[([\s\S]*?)\]/);
-    if (depMatch) {
-      return depMatch[1]
-        .split('\n')
-        .map(l => l.trim().replace(/["',]/g, '').split(/[=<>!~\[]/)[0].trim())
-        .filter(l => l.length > 0)
-        .slice(0, 30);
-    }
-  }
-
-  return [];
-}
-
-/** Extract dependencies from go.mod. */
-function extractGoDeps(dir: string): string[] {
-  const goMod = readFileOrNull(join(dir, 'go.mod'));
-  if (!goMod) return [];
-
-  const requireBlock = goMod.match(/require\s*\(([\s\S]*?)\)/);
-  if (!requireBlock) return [];
-
-  return requireBlock[1]
-    .split('\n')
-    .map(l => l.trim().split(/\s/)[0])
-    .filter(l => l && !l.startsWith('//'))
-    .map(l => l.split('/').pop() || l) // use last segment as name
-    .slice(0, 30);
-}
-
-/** Extract dependencies from Cargo.toml. */
-function extractRustDeps(dir: string): string[] {
-  const cargo = readFileOrNull(join(dir, 'Cargo.toml'));
-  if (!cargo) return [];
-
-  const depSection = cargo.match(/\[dependencies\]([\s\S]*?)(?:\[|$)/);
-  if (!depSection) return [];
-
-  return depSection[1]
-    .split('\n')
-    .map(l => l.trim().split(/\s*=/)[0].trim())
-    .filter(l => l.length > 0 && !l.startsWith('#'))
-    .slice(0, 30);
 }
 
 /** Collect all config content (CLAUDE.md, skills, cursor rules, etc.). */

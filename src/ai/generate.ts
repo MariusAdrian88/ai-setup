@@ -1,6 +1,7 @@
 import type { Fingerprint } from '../fingerprint/index.js';
 import { getProvider, TRANSIENT_ERRORS } from '../llm/index.js';
 import { GENERATION_SYSTEM_PROMPT } from './prompts.js';
+import { extractAllDeps } from '../utils/dependencies.js';
 
 type TargetAgent = ('claude' | 'cursor' | 'codex')[];
 
@@ -293,6 +294,12 @@ export function buildGeneratePrompt(
     if (ca.truncated) {
       parts.push('\n(Code analysis was truncated due to size limits — not all files are shown.)');
     }
+  }
+
+  const allDeps = extractAllDeps(process.cwd());
+  if (allDeps.length > 0) {
+    parts.push(`\nDEPENDENCY COVERAGE — mention at least 85% of these ${allDeps.length} packages by name in CLAUDE.md or skills for full coverage points:`);
+    parts.push(allDeps.join(', '));
   }
 
   if (prompt) parts.push(`\nUser instructions: ${prompt}`);

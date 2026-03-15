@@ -102,7 +102,7 @@ Quality (25 pts):
 - No contradictions (2 pts) — consistent tool/style recommendations
 
 Coverage (20 pts):
-- Dependency coverage (10 pts) — CRITICAL: mention the project's actual dependencies by name in CLAUDE.md or skills. Reference the key packages from package.json/requirements.txt/go.mod. The scoring checks whether each non-trivial dependency name appears somewhere in your output. Aim for >80% coverage.
+- Dependency coverage (10 pts) — CRITICAL: the exact dependency list is provided in your input under "DEPENDENCY COVERAGE". Mention AT LEAST 85% of them by name in CLAUDE.md or skills. You get full points at 85%+, proportional below that. Weave them naturally into architecture, key deps, and conventions sections.
 - Service/MCP coverage (6 pts) — reference detected services (DB, cloud, etc.)
 - MCP completeness (4 pts) — full points if no external services detected
 
