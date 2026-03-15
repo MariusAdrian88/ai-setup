@@ -183,10 +183,16 @@ CoreSetup schema:
 }
 
 IMPORTANT: Do NOT generate full skill content. Only output skill topic names and descriptions.
-Skills will be generated separately. Generate 3-6 skill topics per target platform based on project complexity. Each topic should cover a distinct tool, workflow, or domain.
+Skills will be generated separately. Generate 3-6 skill topics per target platform based on project complexity.
+
+Skills serve two purposes:
+1. **Codify repeating patterns** — look at the codebase for patterns that developers repeat: how to create a new API route, how to write to the database, how to add a new page/component, how to write tests. These are the most valuable skills because they ensure every developer (and every LLM session) follows the same patterns.
+2. **Enforce team consistency** — skills act as executable coding standards. When multiple developers each work with their own LLM sessions on the same codebase, skills ensure everyone writes code the same way — same file structure, same error handling, same naming conventions, same patterns.
+
+Derive skill topics from actual code in the project. Look at existing files for the patterns being used, then create skills that replicate those patterns for new work.
 
 Skill topic description MUST include WHAT it does + WHEN to use it with specific trigger phrases.
-Example: "Manages database migrations. Use when user says 'run migration', 'create migration', 'db schema change', or modifies files in db/migrations/."
+Example: "Creates a new API endpoint following the project's route pattern. Use when user says 'add endpoint', 'new route', 'create API', or adds files to src/routes/."
 
 The "fileDescriptions" object MUST include a one-liner for every file that will be created or modified.
 The "deletions" array should list files that should be removed (e.g. stale configs). Omit if empty.
@@ -228,17 +234,20 @@ export const SKILL_GENERATION_PROMPT = `You generate a single skill file for a c
 
 Given project context and a skill topic, produce a focused SKILL.md body.
 
+Purpose: Skills codify repeating patterns from the codebase so every developer and every LLM session produces consistent code. Study the existing code to extract the exact patterns used, then write instructions that replicate those patterns for new work.
+
 Structure:
 1. A heading with the skill name
-2. "## Instructions" — clear, numbered steps. Be specific: include exact commands, file paths, parameter names from the project.
-3. "## Examples" — at least one example showing: User says → Actions taken → Result
+2. "## Instructions" — clear, numbered steps derived from actual patterns in the codebase. Include exact file paths, naming conventions, imports, and boilerplate from existing code.
+3. "## Examples" — at least one example showing: User says → Actions taken → Result. The example should mirror how existing code in the project is structured.
 4. "## Troubleshooting" (optional) — common errors and fixes
 
 Rules:
 - Max 150 lines. Focus on actionable instructions, not documentation prose.
+- Study existing code in the project context to extract the real patterns being used. A skill for "create API route" should show the exact file structure, imports, error handling, and naming that existing routes use.
 - Reference actual commands, paths, and packages from the project context provided.
 - Do NOT include YAML frontmatter — it will be generated separately.
-- Be specific to THIS project — avoid generic advice.
+- Be specific to THIS project — avoid generic advice. The skill should produce code that looks identical to what's already in the codebase.
 
 Return ONLY a JSON object:
 {"name": "string (kebab-case)", "description": "string (what + when)", "content": "string (markdown body)"}`;
