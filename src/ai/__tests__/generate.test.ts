@@ -116,7 +116,7 @@ describe('buildGeneratePrompt', () => {
       { path: 'package.json', content: '{"name": "test"}', size: 16 },
     ];
     const fp = makeFingerprint({
-      codeAnalysis: { files, truncated: false, totalProjectTokens: 100, includedTokens: 100 },
+      codeAnalysis: { files, truncated: false, totalProjectTokens: 100, compressedTokens: 80, includedTokens: 100, filesAnalyzed: 2, filesIncluded: 2, duplicateGroups: 0 },
     });
     const prompt = buildGeneratePrompt(fp, ['claude']);
     expect(prompt).toContain('[src/index.ts]');
@@ -131,7 +131,11 @@ describe('buildGeneratePrompt', () => {
         files: [{ path: 'src/a.ts', content: 'const a = 1;', size: 12 }],
         truncated: true,
         totalProjectTokens: 200000,
+        compressedTokens: 160000,
         includedTokens: 150000,
+        filesAnalyzed: 500,
+        filesIncluded: 300,
+        duplicateGroups: 10,
       },
     });
     const prompt = buildGeneratePrompt(fp, ['claude']);

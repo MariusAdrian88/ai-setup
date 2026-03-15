@@ -131,7 +131,7 @@ export async function initCommand(options: InitOptions) {
   spinner.succeed('Project analyzed');
   log(options.verbose, `Fingerprint: ${fingerprint.languages.length} languages, ${fingerprint.frameworks.length} frameworks, ${fingerprint.fileTree.length} files`);
   if (options.verbose && fingerprint.codeAnalysis) {
-    log(options.verbose, `Code analysis: ${fingerprint.codeAnalysis.files.length} files, ~${fingerprint.codeAnalysis.includedTokens.toLocaleString()} tokens${fingerprint.codeAnalysis.truncated ? ` (trimmed from ~${fingerprint.codeAnalysis.totalProjectTokens.toLocaleString()})` : ''}`);
+    log(options.verbose, `Code analysis: ${fingerprint.codeAnalysis.filesIncluded}/${fingerprint.codeAnalysis.filesAnalyzed} files, ~${fingerprint.codeAnalysis.includedTokens.toLocaleString()} tokens, ${fingerprint.codeAnalysis.duplicateGroups} dedup groups`);
   }
 
   trackInitProjectDiscovered(fingerprint.languages.length, fingerprint.frameworks.length, fingerprint.fileTree.length);
@@ -139,10 +139,20 @@ export async function initCommand(options: InitOptions) {
   console.log(chalk.dim(`  Files: ${fingerprint.fileTree.length} found`));
   if (fingerprint.codeAnalysis) {
     const ca = fingerprint.codeAnalysis;
-    const contextInfo = ca.truncated
-      ? `Context: ~${ca.includedTokens.toLocaleString()} tokens (${Math.round((ca.includedTokens / ca.totalProjectTokens) * 100)}% of ${ca.totalProjectTokens.toLocaleString()} total)`
-      : `Context: ~${ca.includedTokens.toLocaleString()} tokens`;
-    console.log(chalk.dim(`  ${contextInfo}`));
+    const compressionPct = ca.totalProjectTokens > 0
+      ? Math.round((1 - ca.compressedTokens / ca.totalProjectTokens) * 100)
+      : 0;
+    const parts = [`Context: ~${ca.includedTokens.toLocaleString()} tokens sent`];
+    if (ca.truncated) {
+      parts.push(`(${Math.round((ca.includedTokens / ca.totalProjectTokens) * 100)}% of ${ca.totalProjectTokens.toLocaleString()} total)`);
+    }
+    if (compressionPct > 5) {
+      parts.push(`compressed ${compressionPct}%`);
+    }
+    if (ca.duplicateGroups > 0) {
+      parts.push(`${ca.duplicateGroups} duplicate group${ca.duplicateGroups === 1 ? '' : 's'} merged`);
+    }
+    console.log(chalk.dim(`  ${parts.join(' · ')}`));
   }
   console.log('');
 

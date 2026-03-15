@@ -76,7 +76,11 @@ export interface CodeAnalysis {
   files: ProjectFile[];
   truncated: boolean;
   totalProjectTokens: number;
+  compressedTokens: number;
   includedTokens: number;
+  filesAnalyzed: number;
+  filesIncluded: number;
+  duplicateGroups: number;
 }
 
 /**
@@ -223,6 +227,7 @@ export function analyzeCode(dir: string): CodeAnalysis {
 
   // Second pass: read, compress, and collect files
   const readFiles: Array<{ path: string; content: string; ext: string; rawSize: number }> = [];
+  let compressedChars = 0;
 
   for (const relPath of allFiles) {
     const fullPath = path.join(dir, relPath);
@@ -237,6 +242,7 @@ export function analyzeCode(dir: string): CodeAnalysis {
 
     const ext = path.extname(relPath).toLowerCase();
     const compressed = compressContent(rawContent, ext);
+    compressedChars += compressed.length;
 
     readFiles.push({
       path: relPath,
@@ -248,6 +254,7 @@ export function analyzeCode(dir: string): CodeAnalysis {
 
   // Third pass: deduplicate similar files
   const deduped = deduplicateFiles(readFiles);
+  const dupGroups = deduped.filter(f => f.path.startsWith('[similar')).length;
 
   // Fourth pass: fit into budget
   let includedChars = 0;
@@ -269,7 +276,11 @@ export function analyzeCode(dir: string): CodeAnalysis {
     files,
     truncated,
     totalProjectTokens: Math.ceil(totalChars / 4),
+    compressedTokens: Math.ceil(compressedChars / 4),
     includedTokens: Math.ceil(includedChars / 4),
+    filesAnalyzed: readFiles.length,
+    filesIncluded: files.length,
+    duplicateGroups: dupGroups,
   };
 }
 
