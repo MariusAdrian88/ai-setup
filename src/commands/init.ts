@@ -339,69 +339,6 @@ export async function initCommand(options: InitOptions) {
     report.addJson('Generation: Parsed Setup', generatedSetup);
   }
 
-  // Inline polish: score the generated content and fix if needed, all before user review.
-  // We need files on disk for scoring, so we do a pre-write, score, polish, then let
-  // the normal staging flow handle the diff presentation.
-  {
-    const preWriteResult = writeSetup(generatedSetup as unknown as Parameters<typeof writeSetup>[0]);
-    const inlineScore = computeLocalScore(process.cwd(), targetAgent);
-
-    if (inlineScore.score < 100) {
-      const inlineFailingChecks = inlineScore.checks
-        .filter(c => !c.passed && c.maxPoints > 0)
-        .filter(c => !NON_LLM_CHECKS.has(c.id));
-
-      if (inlineFailingChecks.length > 0) {
-        genSpinner.text = 'Polishing generated setup...';
-        log(options.verbose, `Inline polish: score ${inlineScore.score}/100, fixing ${inlineFailingChecks.length} checks`);
-
-        try {
-          const polishResult = await generateSetup(
-            fingerprint, targetAgent, undefined,
-            { onStatus: () => {}, onComplete: () => {}, onError: () => {} },
-            inlineFailingChecks.map(c => ({ name: c.name, suggestion: c.suggestion, fix: c.fix })),
-            inlineScore.score,
-            inlineScore.checks.filter(c => c.passed).map(c => ({ name: c.name })),
-            { skipSkills: true, forceTargetedFix: true },
-          );
-
-          if (polishResult.setup) {
-            // Preserve skills from the original setup — polish runs with skipSkills
-            const origClaude = generatedSetup.claude as Record<string, unknown> | undefined;
-            const origCodex = generatedSetup.codex as Record<string, unknown> | undefined;
-            const origCursor = generatedSetup.cursor as Record<string, unknown> | undefined;
-
-            generatedSetup = polishResult.setup;
-
-            const polishedClaude = (generatedSetup.claude ?? {}) as Record<string, unknown>;
-            const polishedCodex = (generatedSetup.codex ?? {}) as Record<string, unknown>;
-            const polishedCursor = (generatedSetup.cursor ?? {}) as Record<string, unknown>;
-
-            if (origClaude?.skills && !polishedClaude.skills) {
-              polishedClaude.skills = origClaude.skills;
-              generatedSetup.claude = polishedClaude;
-            }
-            if (origCodex?.skills && !polishedCodex.skills) {
-              polishedCodex.skills = origCodex.skills;
-              generatedSetup.codex = polishedCodex;
-            }
-            if (origCursor?.skills && !polishedCursor.skills) {
-              polishedCursor.skills = origCursor.skills;
-              generatedSetup.cursor = polishedCursor;
-            }
-
-            writeSetup(generatedSetup as unknown as Parameters<typeof writeSetup>[0]);
-            log(options.verbose, 'Inline polish applied');
-          }
-        } catch {
-          log(options.verbose, 'Inline polish failed, continuing with original');
-        }
-      }
-    }
-
-    // Undo the pre-write so the staging diff shows the real delta from original files
-    try { undoSetup(); } catch { /* best effort — backup restores originals */ }
-  }
 
   const elapsedMs = Date.now() - genStartTime;
   trackInitGenerationCompleted(elapsedMs, 0);
