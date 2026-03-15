@@ -151,27 +151,29 @@ caliber undo                         # Revert everything
 
 ## 📊 Scoring
 
-`caliber score` gives you a deterministic quality score using industry best practices.
+`caliber score` gives you a deterministic, tech-stack-agnostic quality score. No LLM needed — it cross-references your config files against the actual project filesystem.
 
 ```
-  Config Score: 87/100 (A) ✨
+  Agent Config Score    88 / 100    Grade A
 
-  FILES & SETUP      22/25   ████████████████████░░
-  QUALITY            21/25   ████████████████████░░
-  COVERAGE           18/20   ██████████████████░░░░
-  ACCURACY           13/15   █████████████████░░░░░
-  FRESHNESS & SAFETY  8/10   ████████████████░░░░░░
-  BONUS               5/5   ████████████████████████
+  FILES & SETUP                                17 / 17
+  QUALITY                                      21 / 23
+  GROUNDING                                    20 / 20
+  ACCURACY                                     10 / 15
+  FRESHNESS & SAFETY                           10 / 10
+  BONUS                                         5 / 5
 ```
 
 | Category               | Points | What it checks                                                     |
 | ---------------------- | ------ | ------------------------------------------------------------------ |
-| **Files & Setup**      | 25     | Config files exist, skills present, cross-platform parity          |
-| **Quality**            | 25     | Has build/test commands, not bloated, no vague text, no duplicates |
-| **Coverage**           | 20     | Mentions actual dependencies and services                          |
-| **Accuracy**           | 15     | Documented commands and file paths are valid                       |
-| **Freshness & Safety** | 10     | Recently updated, no leaked secrets, permissions set               |
+| **Files & Setup**      | 25     | Config files exist, skills present, MCP servers, cross-platform parity |
+| **Quality**            | 25     | Has code blocks, concise token budget, concrete instructions, structured headings |
+| **Grounding**          | 20     | Config references actual project directories and files             |
+| **Accuracy**           | 15     | Referenced paths exist on disk, config is in sync with code (git-based) |
+| **Freshness & Safety** | 10     | Recently updated, no leaked secrets, permissions configured        |
 | **Bonus**              | 5      | Auto-refresh hooks, AGENTS.md, OpenSkills format                   |
+
+Every failing check includes structured fix data — when `caliber init` runs, the LLM receives exactly what's wrong and how to fix it.
 
 ## 🧩 Skills
 
