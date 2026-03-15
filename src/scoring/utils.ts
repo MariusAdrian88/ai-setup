@@ -72,15 +72,36 @@ export function collectProjectStructure(dir: string, maxDepth = 2): ProjectStruc
 }
 
 /**
- * Collect all agent config file content (CLAUDE.md, .cursorrules, AGENTS.md, skills, .mdc rules).
+ * Collect primary config file content (CLAUDE.md, .cursorrules, AGENTS.md).
+ * Does NOT include skills (they use progressive disclosure — loaded on demand, not all at once).
  */
-export function collectAllConfigContent(dir: string): string {
+export function collectPrimaryConfigContent(dir: string): string {
   const parts: string[] = [];
 
   for (const file of ['CLAUDE.md', '.cursorrules', 'AGENTS.md']) {
     const content = readFileOrNull(join(dir, file));
     if (content) parts.push(content);
   }
+
+  // Cursor .mdc rules (always loaded via frontmatter matching)
+  try {
+    const rulesDir = join(dir, '.cursor', 'rules');
+    const mdcFiles = readdirSync(rulesDir).filter(f => f.endsWith('.mdc'));
+    for (const f of mdcFiles) {
+      const content = readFileOrNull(join(rulesDir, f));
+      if (content) parts.push(content);
+    }
+  } catch { /* dir doesn't exist */ }
+
+  return parts.join('\n');
+}
+
+/**
+ * Collect all agent config file content including skills.
+ * Used for grounding/reference checks (not token budget).
+ */
+export function collectAllConfigContent(dir: string): string {
+  const parts: string[] = [collectPrimaryConfigContent(dir)];
 
   // Skills
   for (const skillsDir of [join(dir, '.claude', 'skills'), join(dir, '.agents', 'skills')]) {
@@ -97,16 +118,6 @@ export function collectAllConfigContent(dir: string): string {
       }
     } catch { /* dir doesn't exist */ }
   }
-
-  // Cursor .mdc rules
-  try {
-    const rulesDir = join(dir, '.cursor', 'rules');
-    const mdcFiles = readdirSync(rulesDir).filter(f => f.endsWith('.mdc'));
-    for (const f of mdcFiles) {
-      const content = readFileOrNull(join(rulesDir, f));
-      if (content) parts.push(content);
-    }
-  } catch { /* dir doesn't exist */ }
 
   return parts.join('\n');
 }

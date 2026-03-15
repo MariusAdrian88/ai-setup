@@ -1,4 +1,4 @@
-import { existsSync } from 'fs';
+import { existsSync, statSync } from 'fs';
 import { execSync } from 'child_process';
 import { join } from 'path';
 import type { Check } from '../index.js';
@@ -14,10 +14,32 @@ import { readFileOrNull } from '../utils.js';
 
 /**
  * Get the number of commits since the config file was last modified.
- * Uses git history for reliability, falls back to "unknown" if not in git.
+ * Uses git history, but if the file's mtime is more recent than HEAD
+ * (e.g., just written by caliber init but not yet committed), treats it as fresh.
  */
 function getCommitsSinceConfigUpdate(dir: string): number | null {
   const configFiles = ['CLAUDE.md', 'AGENTS.md', '.cursorrules'];
+
+  // Check if any config file has been modified more recently than HEAD
+  // (indicates caliber init just wrote it but hasn't committed yet)
+  try {
+    const headTimestamp = execSync(
+      'git log -1 --format=%ct HEAD',
+      { cwd: dir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+    ).trim();
+    const headTime = parseInt(headTimestamp, 10) * 1000;
+
+    for (const file of configFiles) {
+      const filePath = join(dir, file);
+      if (!existsSync(filePath)) continue;
+      try {
+        const mtime = statSync(filePath).mtime.getTime();
+        if (mtime > headTime) {
+          return 0; // file is newer than HEAD — just written, treat as fresh
+        }
+      } catch { /* skip */ }
+    }
+  } catch { /* not in git */ }
 
   for (const file of configFiles) {
     try {

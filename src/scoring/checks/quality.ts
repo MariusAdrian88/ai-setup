@@ -14,7 +14,7 @@ import {
 } from '../constants.js';
 import {
   readFileOrNull,
-  collectAllConfigContent,
+  collectPrimaryConfigContent,
   estimateTokens,
   analyzeMarkdownStructure,
   classifyLine,
@@ -62,8 +62,8 @@ export function checkQuality(dir: string): Check[] {
       : undefined,
   });
 
-  // 2. Concise config — total token budget across all config files
-  const totalContent = collectAllConfigContent(dir);
+  // 2. Concise config — token budget for primary config files (not skills — they use progressive disclosure)
+  const totalContent = collectPrimaryConfigContent(dir);
   const totalTokens = estimateTokens(totalContent);
   const tokenThreshold = TOKEN_BUDGET_THRESHOLDS.find(t => totalTokens <= t.maxTokens);
   const tokenPoints = totalContent.length === 0
