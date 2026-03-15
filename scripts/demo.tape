@@ -1,9 +1,9 @@
 Output assets/demo.gif
 Set Shell bash
 Set FontFamily "SF Mono"
-Set FontSize 13
+Set FontSize 14
 Set Width 960
-Set Height 740
+Set Height 620
 Set Padding 20
 Set Framerate 20
 Set TypingSpeed 0
@@ -17,4 +17,4 @@ Show
 
 Type "bash scripts/demo-output.sh"
 Enter
-Sleep 16s
+Sleep 12s
