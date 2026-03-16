@@ -12,7 +12,7 @@ import { stageFiles, cleanupStaging } from '../writers/staging.js';
 import { promptReviewMethod, openReview } from '../utils/review.js';
 import { collectSetupFiles } from './setup-files.js';
 import { installHook, installPreCommitHook } from '../lib/hooks.js';
-import { installLearningHooks } from '../lib/learning-hooks.js';
+import { installLearningHooks, installCursorLearningHooks } from '../lib/learning-hooks.js';
 import { writeState, getCurrentHeadSha } from '../lib/state.js';
 import { SpinnerMessages, REFINE_MESSAGES } from '../utils/spinner-messages.js';
 import { promptInput } from '../utils/prompt.js';
@@ -44,6 +44,7 @@ import {
   trackInitHookSelected,
   trackInitSkillsSearch,
   trackInitScoreRegression,
+  trackInitLearnEnabled,
 } from '../telemetry/events.js';
 
 type TargetAgent = ('claude' | 'cursor' | 'codex')[];
@@ -602,13 +603,6 @@ export async function initCommand(options: InitOptions) {
       console.log(chalk.dim('  Claude Code hook already installed'));
     }
 
-    const learnResult = installLearningHooks();
-    if (learnResult.installed) {
-      console.log(`  ${chalk.green('✓')} Learning hooks installed — session insights captured automatically`);
-      console.log(chalk.dim('    Run ') + chalk.hex('#83D1EB')('caliber learn remove') + chalk.dim(' to disable'));
-    } else if (learnResult.alreadyInstalled) {
-      console.log(chalk.dim('  Learning hooks already installed'));
-    }
   }
 
   if (hookChoice === 'precommit' || hookChoice === 'both') {
@@ -625,6 +619,33 @@ export async function initCommand(options: InitOptions) {
 
   if (hookChoice === 'skip') {
     console.log(chalk.dim('  Skipped auto-sync hooks. Run ') + chalk.hex('#83D1EB')('caliber hooks --install') + chalk.dim(' later to enable.'));
+  }
+
+  // Session Learning prompt (only for agents that support it)
+  const hasLearnableAgent = targetAgent.includes('claude') || targetAgent.includes('cursor');
+  if (hasLearnableAgent) {
+    if (!options.autoApprove) {
+      const enableLearn = await promptLearnInstall(targetAgent);
+      trackInitLearnEnabled(enableLearn);
+      if (enableLearn) {
+        if (targetAgent.includes('claude')) {
+          const r = installLearningHooks();
+          if (r.installed) console.log(`  ${chalk.green('✓')} Learning hooks installed for Claude Code`);
+          else if (r.alreadyInstalled) console.log(chalk.dim('  Claude Code learning hooks already installed'));
+        }
+        if (targetAgent.includes('cursor')) {
+          const r = installCursorLearningHooks();
+          if (r.installed) console.log(`  ${chalk.green('✓')} Learning hooks installed for Cursor`);
+          else if (r.alreadyInstalled) console.log(chalk.dim('  Cursor learning hooks already installed'));
+        }
+        console.log(chalk.dim('    Run ') + chalk.hex('#83D1EB')('caliber learn status') + chalk.dim(' to see insights'));
+      } else {
+        console.log(chalk.dim('  Skipped. Run ') + chalk.hex('#83D1EB')('caliber learn install') + chalk.dim(' later to enable.'));
+      }
+    } else {
+      if (targetAgent.includes('claude')) installLearningHooks();
+      if (targetAgent.includes('cursor')) installCursorLearningHooks();
+    }
   }
 
   // Done!
@@ -812,6 +833,26 @@ async function promptHookType(targetAgent: TargetAgent): Promise<HookChoice> {
   return select({
     message: 'Keep your AI docs & skills in sync as your code evolves?',
     choices,
+  });
+}
+
+async function promptLearnInstall(targetAgent: TargetAgent): Promise<boolean> {
+  const hasClaude = targetAgent.includes('claude');
+  const hasCursor = targetAgent.includes('cursor');
+  const agentName = hasClaude && hasCursor ? 'Claude and Cursor'
+    : hasClaude ? 'Claude' : 'Cursor';
+
+  console.log(chalk.bold(`\n  Session Learning\n`));
+  console.log(chalk.dim(`  Caliber can learn from your ${agentName} sessions — when a tool fails`));
+  console.log(chalk.dim(`  or you correct a mistake, it captures the lesson so it won't`));
+  console.log(chalk.dim(`  happen again. Runs once at session end using the fast model.\n`));
+
+  return select({
+    message: 'Enable session learning?',
+    choices: [
+      { name: 'Enable session learning (recommended)', value: true },
+      { name: 'Skip for now', value: false },
+    ],
   });
 }
 

@@ -76,6 +76,10 @@ export function trackUndoExecuted(): void {
   trackEvent('undo_executed');
 }
 
+export function trackInitLearnEnabled(enabled: boolean): void {
+  trackEvent('init_learn_enabled', { enabled });
+}
+
 // --- Learn ROI events ---
 
 export function trackLearnSessionAnalyzed(props: {
