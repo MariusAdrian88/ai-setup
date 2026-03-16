@@ -27,6 +27,7 @@ import type { DismissedCheck } from '../scoring/dismissed.js';
 import { searchAndInstallSkills } from './recommend.js';
 import type { FailingCheck, PassingCheck } from '../ai/generate.js';
 import { buildGeneratePrompt } from '../ai/generate.js';
+import { runScoreRefineWithSpinner } from '../ai/score-refine.js';
 import { DebugReport } from '../lib/debug-report.js';
 import {
   trackInitProviderSelected,
@@ -341,7 +342,6 @@ export async function initCommand(options: InitOptions) {
   const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
   genSpinner.succeed(`Setup generated ${chalk.dim(`in ${timeStr}`)}`);
   log(options.verbose, `Generation completed: ${elapsedMs}ms, stopReason: ${genStopReason || 'end_turn'}`);
-  printSetupSummary(generatedSetup);
 
   // Session context — carries through the entire init flow
   const sessionHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
@@ -349,6 +349,11 @@ export async function initCommand(options: InitOptions) {
     role: 'assistant',
     content: summarizeSetup('Initial generation', generatedSetup),
   });
+
+  // Score-based auto-refinement
+  generatedSetup = await runScoreRefineWithSpinner(generatedSetup, process.cwd(), sessionHistory);
+
+  printSetupSummary(generatedSetup);
 
   // Step 4: Review and apply
   console.log(title.bold('  Step 4/5 — Review\n'));
