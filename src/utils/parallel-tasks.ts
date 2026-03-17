@@ -14,7 +14,7 @@ interface TaskState {
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const SPINNER_INTERVAL_MS = 80;
 const CARD_ADVANCE_MS = 15_000;
-const NAME_COL_WIDTH = 26;
+const NAME_COL_WIDTH = 30;
 const PREFIX = '    ';
 
 export class ParallelTaskDisplay {
