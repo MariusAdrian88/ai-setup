@@ -6,6 +6,7 @@ import { checkGrounding } from './checks/grounding.js';
 import { checkAccuracy } from './checks/accuracy.js';
 import { checkFreshness } from './checks/freshness.js';
 import { checkBonus } from './checks/bonus.js';
+import { checkSources } from './checks/sources.js';
 import { computeGrade, CURSOR_ONLY_CHECKS, CLAUDE_ONLY_CHECKS, CODEX_ONLY_CHECKS, COPILOT_ONLY_CHECKS, BOTH_ONLY_CHECKS, NON_CODEX_CHECKS } from './constants.js';
 import { getDismissedIds } from './dismissed.js';
 
@@ -101,6 +102,7 @@ export function computeLocalScore(dir: string, targetAgent?: TargetAgent): Score
     ...checkAccuracy(dir),
     ...checkFreshness(dir),
     ...checkBonus(dir),
+    ...checkSources(dir),
   ];
 
   const dismissed = getDismissedIds();
