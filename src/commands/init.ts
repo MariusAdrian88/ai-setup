@@ -829,6 +829,14 @@ export async function initCommand(options: InitOptions) {
 
   if (fingerprint) ensurePermissions(fingerprint);
 
+  // Install pre-commit hook for automatic refresh on every commit
+  const hookResult = installPreCommitHook();
+  if (hookResult.installed) {
+    console.log(`  ${chalk.green('✓')} Pre-commit hook installed — configs sync on every commit`);
+  } else if (hookResult.alreadyInstalled) {
+    console.log(chalk.dim('  Pre-commit hook already installed'));
+  }
+
   const sha = getCurrentHeadSha();
   writeState({
     lastRefreshSha: sha ?? '',
